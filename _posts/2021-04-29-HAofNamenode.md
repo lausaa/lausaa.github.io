@@ -2,7 +2,8 @@
 layout: post
 title: "Namenode的HA"
 date: 2021-04-29
-tags: [HDFS]
+tags: [HDFS, 分布式存储]
+categories: 202104
 comments: true
 author: lausaa
 ---

@@ -1,6 +1,6 @@
 ---
 layout: post
-title: "Namenode的HA"
+title: "HDFS HA 之Namenode 主备状态管理"
 date: 2021-04-29
 tags: [HDFS, 分布式存储]
 categories: "202104"
@@ -8,7 +8,9 @@ comments: true
 author: lausaa
 ---
 
-为了保证HDFS 的可用性，通常会配置两个Namenode，以active/standby 的模式运行，而zkfc 和zk 负责状态管理。
+早期的HDFS 2.0.0，Namenode 是单点的，挂了就全玩儿完。
+
+为了保证HDFS 的高可用，通常会配置两个Namenode，以active/standby 的模式运行，而zkfc 和zk 负责状态管理。
 
 zkfc 是一个独立进程，通常与namenode 跑在同一台机器，运行在zk 与namenode 之间，入口类为DFSZKFailoverController。
 

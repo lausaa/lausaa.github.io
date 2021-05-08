@@ -56,7 +56,7 @@ FSImage 文件默认保存两个，对应参数dfs.namenode.num.checkpoints.reta
 JournalNode 是一个集群，由3 个以上的奇数个节点组成（paxos 协议？），JN 服务仅用于中介edits 文件传输，属于比较轻量级的。  
 Active NN 会将edits 文件同步给JN，然后Standby NN 会周期的从JN 同步获取最新edits（周期参数dfs.ha.tail-edits.period），然后在本地执行Checkpoint 及后续操作。
 
-## NameNode 启动加载元数据磁盘机构流程
+## NameNode 启动加载元数据磁盘结构流程
 1. loadFSImageFile - 读取最新的fsimage_xx 生成内存结构；
 2. loadEdits - 读取fsimage_xx 之后的edits 文件，并应用到内存结构；
 3. Checkpoint - 将当前状态产生一个新的fsimage_xx文件；

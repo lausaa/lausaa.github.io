@@ -51,9 +51,8 @@ FSImage 文件默认保存两个，对应参数dfs.namenode.num.checkpoints.reta
     # 查看FSImage 文件：
     hdfs oiv -p XML -i fsimage -o fsimage.xml
 
-基于上述元数据管理机制，我们需要一个可靠的中介模块来传输edits 文件，也就是上面提到的QJM 和NFS，而官方更倾向与QJM 方式。  
-
 ## JournalNode
+基于上述元数据管理机制，我们需要一个可靠的中介模块来传输edits 文件，也就是上面提到的QJM 和NFS，而官方更倾向与QJM 方式。  
 JournalNode 是一个集群，由3 个以上的奇数个节点组成（paxos 协议？），JN 服务仅用于中介edits 文件传输，属于比较轻量级的。  
 Active NN 会将edits 文件同步给JN，然后Standby NN 会周期的从JN 同步获取最新edits（周期参数dfs.ha.tail-edits.period），然后在本地执行Checkpoint 及后续操作。
 

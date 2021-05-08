@@ -14,12 +14,10 @@ zkfc 是一个独立进程，通常与namenode 跑在同一台机器，运行在
 zkfc 包含HealthMonitor 和ActiveStandbyElector 两个主要模块。
 
 ## ActiveStandbyElector 负责A/S 模式管理
-zkfc 通过createLockNodeAsync 在zk 中创建一个EPHEMERAL znode，此模式znode 的特点是临时性，当创建者与zk 的session 中断后，此znode 即被删除。
-
-session 中断是有一个timeout 的，zk 配置文件中的maxSessionTimeOut 和minSessionTimeOut 两个配置项，意思是zkClient 的连接请求带过来一个sessionTimeout 参数，这个参数在这个[min, max] 区间才合法，否则就取对应的边界值。
-
-这个znode 相当于一把独占锁，谁成功创建谁就有权成为active namenode。ActiveStandbyElector::processResult -> becomeActive 然后通过RPC（HAServiceProtocolHelper.transitionToActive）通知namenode 进程切换为active。
-
+zkfc 通过createLockNodeAsync 在zk 中创建一个EPHEMERAL znode，此模式znode 的特点是临时性，当创建者与zk 的session 中断后，此znode 即被删除。  
+session 中断是有一个timeout 的，zk 配置文件中的maxSessionTimeOut 和minSessionTimeOut 两个配置项，意思是zkClient 的连接请求带过来一个sessionTimeout 参数，这个参数在这个[min, max] 区间才合法，否则就取对应的边界值。  
+这个znode 相当于一把独占锁，谁成功创建谁就有权成为active namenode。  
+ActiveStandbyElector::processResult -> becomeActive 然后通过RPC（HAServiceProtocolHelper.transitionToActive）通知namenode 进程切换为active。  
 为了避免双active 的情况发生，在becomeActive 之前，需要fenceOldActive，也是通过RPC（transitionToStandby） 通知原active namenode 切换为standby。
 
 ## HealthMonitor 负责Namenode 健康状态监控

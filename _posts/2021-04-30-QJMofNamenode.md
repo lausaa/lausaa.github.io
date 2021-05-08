@@ -41,7 +41,7 @@ Checkpoint 操作由StandbyCheckpointer::CheckpointerThread 线程调用doCheckp
 
 在Standby NN 的doCheckpoint 方法中，新的FSImage 文件合并完成后，要upload 到Active NN：
 1. Standby NN 通过TransferFsImage.uploadImageFromStorage 函数向Active NN 的ImageServlet 发送HTTP 请求，这个请求包含了新的FSImage 文件的txid 等相关信息。  
-2. Active NN 下载后将文件命名为fsimage.ckpt_*， 然后创建MD5 校验和，最后将fsimage.ckpt_* 重命名为fsimage_*。相关操作的还要删除多余的FSImage 文件和edits 文件。
+2. Active NN 下载后将文件命名为fsimage.ckpt_xx， 然后创建MD5，最后将fsimage.ckpt_xx 重命名为fsimage_xx。相关操作的还包括删除多余的FSImage 文件和edits 文件。
 
 edits 文件保存是日志事务数默认1000000 个，参数dfs.namenode.num.extra.edits.retained。  
 FSImage 文件默认保存两个，对应参数dfs.namenode.num.checkpoints.retained。

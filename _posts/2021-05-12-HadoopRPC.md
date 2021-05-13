@@ -63,6 +63,11 @@ serviceRpcServer = new RPC.Builder(conf)
         numHandlers, numReaders, queueSizePerHandler, verbose, secretManager,
         portRangeConfig, alignmentContext);
   }
+
+  相关参数：
+  dfs.namenode.service.handler.count: RPC call 的处理线程数，默认10
+  ipc.server.handler.queue.size: 每个handler 对应的最大队列长度
+  ipc.server.listen.queue.size: 监听队列长度，默认128。需要注意当集群规模上千时，需要设置一个较大值，如32768，同时kernel 参数net.core.somaxconn 需要同步设置。
 ```
 RPC Server 包含三个重要组件，callQueue、connectionManager 和responder，如下：
 ```
@@ -78,10 +83,83 @@ connectionManager = new ConnectionManager();
 // 用于返回调用结果
 responder = new Responder();
 ```
-在Listener 的构造中，启动一个listener 线程用于Socket accept，然启动若干个Reader 线程管理会话，所有的会话会保存到ConnectionManager.connections 管理。
+在Listener 的构造中，启动一个listener 线程用于监听连接，同时启动若干个Reader 工作线程。  
+监听通过Selector 实现，即acceptChannel 注册到selector，然后在listener 线程中做select 阻塞，用于处理会话accept（不就是poll 嘛），如下：
+```
+acceptChannel = ServerSocketChannel.open();
+selector= Selector.open();
+acceptChannel.register(selector, SelectionKey.OP_ACCEPT);
 
-在Responder 的构造中，启动一个线程用于返回结果。
+// listener 线程中，select 阻塞等待会话请求，然后遍历channel 做accept 处理
+run() {
+    getSelector().select();
+    doAccept(key);
+}
 
+doAccept() {
+    channel = server.accept();
+
+    // RoundRobin 拿Reader 工作线程
+    Reader reader = getReader();
+
+    // 会话注册到connectionManager
+    Connection c = connectionManager.register(channel,
+        this.listenPort, this.isOnAuxiliaryPort);
+
+    // 推给Reader 转化RPC 请求
+    reader.addConnection(c);
+}
+```
+Reader 读取网络包，构造RPC 请求，然后放到callQueue，然后由handler 线程执行，流程如下：
+```
+doRead()
+-> readAndProcess()
+    -> channelRead(channel, data);
+    -> processOneRpc(requestData);
+        -> processRpcRequest(header, buffer);
+            -> rpcRequest = buffer.newInstance(rpcRequestClass, conf);
+
+RpcCall call = new RpcCall(this, header.getCallId(),
+          header.getRetryCount(), rpcRequest,
+          ProtoUtil.convert(header.getRpcKind()),
+          header.getClientId().toByteArray(), span, callerContext);
+
+internalQueueCall(call);
+-> internalQueueCall(call, true);
+    -> callQueue.put(call); 
+    -> callQueue.add(call);
+```
+
+所有的会话会都注册到ConnectionManager 管理，在listener 线程中会有个空闲会话的处理，启动一个Timer 线程，遍历所有会话，闲置一定时间的会话将被关闭。如下：
+```
+connectionManager.startIdleScan()
+-> scheduleIdleScanTask()
+    -> closeIdle()
+
+相关参数：
+ipc.client.idlethreshold: 会话数超过此阈值，才执行后续空闲会话处理
+ipc.client.connection.maxidletime: 空闲时间超过此阈值两倍的会话将被关闭
+```
+在Responder 的构造中，启动一个线程用于处理所有call 的返回结果。  
+Responder 通过doRespond 方法接收需要返回的call，每个会话对象会维护一个responseQueue，call 会被加入其中，然后做发送处理。
+总体而言，发送处理也是通过Selector 选择channel，然后将对应的call result 发送回client，如下：
+```
+writeSelector = Selector.open();
+
+// 注册channel 和call
+channel.register(writeSelector, SelectionKey.OP_WRITE, call);
+
+// 阻塞一个清理时间
+writeSelector.select(TimeUnit.NANOSECONDS.toMillis(PURGE_INTERVAL_NANOS));
+
+// 通过channel 异步返回结果
+doAsyncWrite(key)
+-> processResponse(call.connection.responseQueue, false)
+    -> channelWrite(channel, call.rpcResponse)
+
+相关参数：
+ipc.server.max.response.size: 响应请求的消息最大长度；超量消息会被记录到log
+```
 
 ## Datanode 作为Client
 Datanode 的client 角色是在进程启动时创建的，也叫BPOfferService，如下：
@@ -93,9 +171,9 @@ BPOfferService bpos = createBPOS(nsToAdd, nnIds, addrs,
 在BPOfferService 中，为每个Namenode 创建了一个BPServiceActor，如下：
 ```
 for (int i = 0; i < nnAddrs.size(); ++i) {
-      this.bpServices.add(new BPServiceActor(nameserviceId, nnIds.get(i),
-          nnAddrs.get(i), lifelineNnAddrs.get(i), this));
-    }
+    this.bpServices.add(new BPServiceActor(nameserviceId, nnIds.get(i),
+        nnAddrs.get(i), lifelineNnAddrs.get(i), this));
+}
 ```
 每个BPServiceActor 都是一个独立的线程，如下：
 ```
@@ -121,20 +199,23 @@ run()
     -> connectToNN(nnAddr)
         -> new DatanodeProtocolClientSideTranslatorPB(nnAddr, getConf())
 
-  public DatanodeProtocolClientSideTranslatorPB(InetSocketAddress nameNodeAddr,
-      Configuration conf) throws IOException {
+public DatanodeProtocolClientSideTranslatorPB(InetSocketAddress nameNodeAddr,
+        Configuration conf) throws IOException {
     RPC.setProtocolEngine(conf, DatanodeProtocolPB.class,
         ProtobufRpcEngine2.class);
     UserGroupInformation ugi = UserGroupInformation.getCurrentUser();
     rpcProxy = createNamenode(nameNodeAddr, conf, ugi);
-  }
+}
 ```
-最终，我们在ProtobufRpcEngine2 类中，找到实际的网络client 初始化，如下：
+我们在ProtobufRpcEngine2 类中，可以找到实际的网络client 初始化，如下：
 ```
 getProxy
 -> new Invoker()
     -> Client.ConnectionId.getConnectionId()
         -> new ConnectionId()  // 只是赋值server 地址之类的参数
+
+相关参数：
+ipc.client.connect.max.retries: 客户端最大重试连接次数
 ```
 而真正的连接发生在RPC 调用时，首先构造一个connection 对象，如下：
 ```
@@ -153,3 +234,5 @@ connection.setupIOstreams(fallbackToSimpleAuth);
     -> run()
         -> receiveRpcResponse()
 ```
+
+综上，我们可以看到整个RPC 实现被封装在ProtobufRpcEngine2 中，其中Server 和Client 端分别实现了网络会话管理，以及通过protobuf 实现序列化与反序列化。

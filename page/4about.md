@@ -16,7 +16,8 @@ A Fireman.
 ## 联系我
 
 * GitHub：[lausaa](https://github.com/lausaa)
-* email：531120135@qq.com
+* EMail：shafanghao@gmail.com
+* WeChat: ![qrcode](/imgs/wx-qrcode.png)
 
 ## 友情链接
 

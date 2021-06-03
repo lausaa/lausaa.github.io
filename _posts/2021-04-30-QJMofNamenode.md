@@ -26,7 +26,9 @@ edits 文件也就是所谓的EditLog Segment，分为写入和完成两种状�
 - Active NN 启动一个daemon 线程NameNodeEditLogRoller，周期检查是否超过了edits 回滚阈值，如果超过了则调用rollEditLog 方法回滚。  
 周期参数为dfs.namenode.edit.log.autoroll.check.interval.ms；  
 回滚阈值参数为dfs.namenode.edit.log.autoroll.multiplier.threshold * dfs.namenode.checkpoint.txns；  
-- Standby NN 在EditLogTailerThread 线程中判断如果长时间没有回滚操作，则调用triggerActiveLogRoll 方法通知Active NN 回滚，周期参数为dfs.ha.log-roll.period（因为Standby 只会读完成状态的edits 文件，inprogress 的不管）；
+- Standby NN 在EditLogTailerThread 线程中主要完成相关的两件事：  
+一是判断如果长时间没有回滚操作，则调用 triggerActiveLogRoll 方法通知Active NN 回滚，周期参数为dfs.ha.log-roll.period（因为Standby 只会读完成状态的edits 文件，inprogress 的不管）；
+二是通过 doTailEdits 方法从JN 读取EditLogs ，加载并应用到本地的元数据内存；
 
 ## FSImage  
 edits 文件数会随着业务不断积累增长，为了解决此问题，需要找一个合适的机会对edits 文件做合并，合并后的文件即为FSImage。  

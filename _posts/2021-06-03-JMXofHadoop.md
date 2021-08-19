@@ -13,18 +13,18 @@ JMX 通过JMXJsonServlet 类实现，该类继承了javax.servlet.http.HttpServl
 
 访问JMX 指标统计的方式：  
 ```
-WEB 访问 http://10.207.40.136:50070/jmx （默认端口50070）
-命令行访问 curl -i http://10.207.40.136:50070/jmx
+WEB 访问 http://x.x.x.x:50070/jmx （默认端口50070）
+命令行访问 curl -i http://x.x.x.x:50070/jmx
 ```
 返回结构为json 格式。
 
 通常来说，由于指标太多，返回较慢，我们可以通过 `qry` 参数指定查询项。例如：  
 ```
-http://10.207.40.136:50070/jmx?qry=Hadoop:service=NameNode,name=FSNamesystem
+http://x.x.x.x:50070/jmx?qry=Hadoop:service=NameNode,name=FSNamesystem
 ```
 还嫌多，`get` 参数可以查询指定项目中的具体指标。例如：
 ```
-http://10.207.40.136:50070/jmx?get=Hadoop:service=NameNode,name=FSNamesystem::BlocksTotal
+http://x.x.x.x:50070/jmx?get=Hadoop:service=NameNode,name=FSNamesystem::BlocksTotal
 ```
 
 在 JMXJsonServlet 类中，doGet 方法会将指定的指标统计项转换成json 串，各个业务模块的指标项数据的获取途径是 MBeanServer。

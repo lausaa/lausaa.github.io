@@ -23,29 +23,29 @@ edits 文件也就是所谓的EditLog Segment，分为写入和完成两种状�
 - edits_$start_txid-$end_txid 文件为完成状态
 
 写入到完成也叫log-roll，有两个触发情况：  
-- Active NN 启动一个daemon 线程NameNodeEditLogRoller，周期检查是否超过了edits 回滚阈值，如果超过了则调用rollEditLog 方法回滚。  
-周期参数为dfs.namenode.edit.log.autoroll.check.interval.ms；  
-回滚阈值参数为dfs.namenode.edit.log.autoroll.multiplier.threshold * dfs.namenode.checkpoint.txns；  
-- Standby NN 在EditLogTailerThread 线程中主要完成相关的两件事：  
+- Active NN 启动一个daemon 线程 NameNodeEditLogRoller，周期检查是否超过了edits 回滚阈值，如果超过了则调用 rollEditLog 方法回滚。  
+周期参数为 dfs.namenode.edit.log.autoroll.check.interval.ms；  
+回滚阈值参数为 dfs.namenode.edit.log.autoroll.multiplier.threshold * dfs.namenode.checkpoint.txns；  
+- Standby NN 在 EditLogTailerThread 线程中主要完成相关的两件事：  
 一是判断如果长时间没有回滚操作，则调用 triggerActiveLogRoll 方法通知Active NN 回滚，周期参数为dfs.ha.log-roll.period（因为Standby 只会读完成状态的edits 文件，inprogress 的不管）；
-二是通过 doTailEdits 方法从JN 读取EditLogs ，加载并应用到本地的元数据内存；
+二是通过 doTailEdits 方法从 JN 读取 EditLogs ，加载并应用到本地的元数据内存；
 
 ## FSImage  
 edits 文件数会随着业务不断积累增长，为了解决此问题，需要找一个合适的机会对edits 文件做合并，合并后的文件即为FSImage。  
 这个合并操作即为Checkpoint，也叫FSImage 回滚。
 
 ## Checkpoint
-由于Checkpoint 操作的计算和内存开销都比较大，且对客户端请求有直接的影响，因此由Standby NN 完成。  
+由于Checkpoint 操作的计算和内存开销都比较大，且对客户端请求有直接的影响，因此由 Standby NN 完成。  
 Checkpoint 操作由StandbyCheckpointer::CheckpointerThread 线程调用doCheckpoint 方法执行。  
 触发条件有两个，满足其一即可：
 - 时间，对应参数dfs.namenode.checkpoint.period，默认是3600s；  
 - 数量，即事务数量达到阈值，参数dfs.namenode.checkpoint.txns，默认1000000；
 
-在Standby NN 的doCheckpoint 方法中，新的FSImage 文件合并完成后，要upload 到Active NN：
+在Standby NN 的 doCheckpoint 方法中，新的FSImage 文件合并完成后，要upload 到Active NN：
 1. Standby NN 通过TransferFsImage.uploadImageFromStorage 函数向Active NN 的ImageServlet 发送HTTP 请求，这个请求包含了新的FSImage 文件的txid 等相关信息。  
 2. Active NN 下载后将文件命名为fsimage.ckpt_xx， 然后创建MD5，最后将fsimage.ckpt_xx 重命名为fsimage_xx。相关操作的还包括删除多余的FSImage 文件和edits 文件。
 
-edits 文件保存是日志事务数默认1000000 个，参数dfs.namenode.num.extra.edits.retained。  
+edits 文件保存的日志事务数默认1000000 个，参数dfs.namenode.num.extra.edits.retained。  
 FSImage 文件默认保存两个，对应参数dfs.namenode.num.checkpoints.retained。
 
     # 查看edits 文件：
@@ -54,9 +54,34 @@ FSImage 文件默认保存两个，对应参数dfs.namenode.num.checkpoints.reta
     hdfs oiv -p XML -i fsimage -o fsimage.xml
 
 ## JournalNode
-基于上述元数据管理机制，我们需要一个可靠的中介模块来传输edits 文件，也就是上面提到的QJM 和NFS，而官方更倾向与QJM 方式。  
-JournalNode 是一个集群，由3 个以上的奇数个节点组成（paxos 协议？），JN 服务仅用于中介edits 文件传输，属于比较轻量级的。  
-Active NN 会将edits 文件同步给JN，然后Standby NN 会周期的从JN 同步获取最新edits（周期参数dfs.ha.tail-edits.period），然后在本地执行Checkpoint 及后续操作。
+基于上述元数据管理机制，我们需要一个可靠的中介模块来传输edits 文件，也就是上面提到的QJM 和NFS，而官方更倾向于QJM 方式。  
+JournalNode 是一个集群，由3 个以上的奇数个节点组成（paxos 协议？），JN 仅用于中介edits 文件传输，属于比较轻量级的服务。  
+Active NN 会将edits 文件同步给JN，然后Standby NN 会周期的从JN 同步获取最新edits（周期参数dfs.ha.tail-edits.period），然后在本地执行 Checkpoint 及后续操作。
+
+### FSEditLog
+Namenode 对 JN 的读写操作都通过 FSEditLog 对象完成。  
+读分为两种情况：
+1. ActiveNN 启动流程中，loadFSImageFile 之后要 loadEdits，而 loadEdits 的 editlog 来源除了本地文件就是 JN，FSEditLog 提供的 selectInputStreams 方法负责选出 loadEdits 所需的来源；
+2. StandbyNN 在 doTailEdits 时要从 JN 读取 editlog 文件，同样通过 selectInputStreams 方法选择读取的来源。  
+
+写有一种情况：
+1. ActiveNN 在执行写操作，需要更新元数据时，会调用 FSEditLog 对象的 logEdit 方法；
+
+写流程涉及到一个双缓冲区的使用，一个负责更新，一个负责固化落盘，两者交换使用，整理如下： 
+``` 
+logEdit
+--> doEditTransaction
+    --> EditsDoubleBuffer::writeOp  // 更新buffer
+logSync
+--> editLogStream.setReadyToFlush()  // 将更新buffer 与落盘buffer 交换
+--> EditLogFileOutputStream::flushAndSync  //  写入本地文件
+--> QuorumOutputStream::flushAndSync  // 写入 JN
+```
+FSEditLog 对象构造：  
+在 Namenode 启动流程中，FSImage 模块启动时构造，其中最主要一点是构造 journalSet。    
+journalSet 是 JournalSet 类的对象，维护了本地文件和 JN 集群。  
+配置本地文件目录和 JN 集群的参数：dfs.namenode.shared.edits.dir
+
 
 ## NameNode 启动加载元数据磁盘结构流程
 1. loadFSImageFile - 读取最新的fsimage_xx 生成内存结构；

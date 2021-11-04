@@ -20,9 +20,7 @@ FSNamesystem
 ## DN 数据结构
 DN 对应三个数据结构，继承关系如下：
 ```
-DatanodeID
---> DatanodeInfo
-    --> DatanodeDescriptor
+DatanodeDescriptor -> DatanodeInfo -> DatanodeID
 ```
 * DatanodeID：维护了一些比较基础的信息，如hostname，IP，端口、storageID 等；
 * DatanodeInfo：除了继承扩展DatanodeID，还维护一些简单的信息，如空间，容量相关，服务状态等；
@@ -58,7 +56,7 @@ private final Host2NodesMap host2DatanodeMap = new Host2NodesMap();
 DatanodeManager 初始是没有记录任何DN 的。每个DN 启动的时候根据配置文件向目标NN 发送注册请求，然后NN 接收到DN 的注册请求后才记录。
 
 ### 注册流程
-BPServiceActor 对象维护一个DN 与NN 通信的主体线程，DN 侧的执行流程如下：
+DN 的BPServiceActor 对象维护一个DN 与NN 通信的主体线程，DN 侧的执行流程如下：
 ```
 connectToNNAndHandshake();
 --> bpNamenode = dn.connectToNN(nnAddr);  // 先建立链接，拿到nnproxy
@@ -78,23 +76,47 @@ NameNodeRpcServer::registerDatanode(DatanodeRegistration nodeReg)
     --> blockManager.registerDatanode(nodeReg);
         --> datanodeManager.registerDatanode(nodeReg);
 ```
-在registerDatanode 方法中，主要构造DatanodeDescriptor 对象，并更新维护上述提到的三个记录DN 的数据结构。  
-对于networktopology 来说，其中间节点InnerNode 构造自自机架等信息，流程如下：
+在registerDatanode 方法中，主要构造DatanodeDescriptor 对象，并更新维护上述提到的三个记录DN 的数据结构。
+
+对于networktopology 来说，其核心是一个以clusterMap 为根的拓扑树，其中间节点InnerNode 构造自自机架等信息，流程如下：
 1. 获取DN 的机架；
 2. 通过机架构造InnerNode；
 
-对于获取机架，HADOOP 采用了一个叫机架感知的技术，即我们通过参数指定一个脚本，该脚本的输入参数是一个DN 的IP 地址，输出是该DN 的机架字符串，然后在注册流程中，NN 拿到DN IP 后通过该脚本获取对应机架。
+clusterMap 的初始化：
 ```
-// 获取机架的方法
+InnerNode clusterMap;
+
+this.factory = InnerNodeImpl.FACTORY;
+this.clusterMap = factory.newInnerNode(NodeBase.ROOT);
+```
+clusterMap 的实际类型为DFSTopologyNodeImpl，其继承关系如下：
+```
+public class DFSTopologyNodeImpl extends InnerNodeImpl {}
+public class InnerNodeImpl extends NodeBase implements InnerNode {}
+```
+对于获取机架，HADOOP 采用了一个叫机架感知的技术，即我们通过参数指定一个脚本，该脚本的输入参数是一个DN 的IP 地址，输出是该DN 的机架字符串，然后在注册流程中，NN 拿到DN IP 后通过该脚本获取对应机架。
+
+获取机架的代码如下：
+```
 DatanodeManager::resolveNetworkLocation(DatanodeID node)
 --> dnsToSwitchMapping.resolve(names);
     --> ScriptBasedMapping::resolve(List<String> names)
 
 * 脚本配置参数：net.topology.script.file.name
-
-// 拓扑数构造
-networktopology.add(node)
---> Node rack = getNodeForNetworkLocation(node);
 ```
-
+新机架的DN 加入时，会通过机架名称构造InnerNode。  
+获取机架，创建机架节点并挂到父节点（clusterMap），最后把DN 加到机架节点中：
+```
+networktopology.add(node)
+--> clusterMap.add(node)
+    --> String parentName = getNextAncestorName(n);
+    --> parentNode = createParentNode(parentName);
+    --> children.add(parentNode);
+    --> childrenMap.put(parentNode.getName(), parentNode);
+    --> parentNode.add(n)
+```
+## 总结
+除上述外，还有节点删除、刷新、心跳和上下线等操作，逻辑比较简单。  
+总之，所有的DN 在NN 端都是在这三个MAP 中管理起来的，论用途的话，不同的场合选用不同的结构。  
+比如datanodeMap 和host2DatanodeMap 都可以看做简单的HashMap，key 不同而已，而networktopology 这个拓扑树用作节点索引，通常用作为数据块选点选盘。
 

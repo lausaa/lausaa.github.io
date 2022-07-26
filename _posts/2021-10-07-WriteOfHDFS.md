@@ -21,20 +21,25 @@ dataOut.writeBytes("Test write data");  // 另一种写法
 dataOut.close();  // close 中包含了 flush
 ```
 与 POSIX 文件系统类似，HDFS 文件的写数流程是 create/append -> write -> close 。
+
 ## create/append 文件
 ### 获取文件系统实例 DistributedFileSystem:  
 FileSystem.get(URI uri, Configuration conf) 的实现中利用了一个 CACHE ，即如果此前已经构造了 FS ，则记录到 CACHE 中，以便于后续直接获取。  
 当然也可以通过开关 `fs.$scheme.impl.disable.cache` 关闭掉 CACHE ，这样每次 get 都会构造一个新的 FS 。  
+
 ### create/append 的主要实现：
 输入是 Path，输出是 FSDataOutputStream 。  
 核心实现在 DFSClient 类中，主要包含两个操作：
 1. 构造输出流: DFSOutputStream.newStreamForCreate(...)
 2. 启动租约: beginFileLease(inodeId, outStream)
+
 ### 输出流
 FSDataOutputStream 继承自 DataOutputStream ，主要维护了写相关的信息，封装了三个主要接口 write, flush 和 close ，其中也包含数据流处理器 DataStreamer 的构造和启动。  
 构造 FSDataOutputStream 的首要参数就是文件，对应的是 HdfsFileStatus 类，通过 RPC `dfsClient.namenode.create(...)` 从 Namenode 获取到。
+
 ### 租约
 租约在另一篇讲述。
+
 ## write 文件
 write 接口有多个，一种典型的 write 输入为：(final byte buf[], int off, int len)。  
 先看下正常写的调用栈：

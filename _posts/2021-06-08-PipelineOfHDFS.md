@@ -104,5 +104,6 @@ receivePacket()
 ```
 至此，pipeline 链路建立完成。
 
-
-
+## 故障处理
+PipelineHealthChecker
+（待续。。。）

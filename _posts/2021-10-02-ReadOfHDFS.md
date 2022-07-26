@@ -10,9 +10,22 @@ author: lausaa
 
 HDFS 读流程分为 Client 、 Namenode 和 Datanode 三端的子流程。
 # Client 端
-## open 文件
-与 POSIX 文件系统类似，HDFS 文件的读取流程也是 open -> read -> close 。
+先看一段简单的客户端读文件代码：
+```
+Configuration conf = new Configuration();
+FileSystem fs = FileSystem.get(new URI("hdfs://ip:port"), conf);
+FSDataInputStream dataIn = null;
 
+try {
+    dataIn = fs.open(new Path("/test/file.data"));
+    int dataBytes = dataIn.read();  // 一种读法
+    IOUtils.copyBytes(dataIn, System.out, 1024, false);  // 另一种读法
+} finally {
+    IOUtils.closeStream(dataIn);
+}
+```
+与 POSIX 文件系统类似，HDFS 文件的读取流程也是 open -> read -> close 。
+## open 文件
 其中 open 的输入是文件路径，输出是 FSDataInputStream 。
 ### FSDataInputStream
 FSDataInputStream 继承自 DFSInputStream ，主要维护了读相关的信息，如客户端配置、文件块和缓存策略等。
